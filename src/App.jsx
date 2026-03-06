@@ -1,15 +1,18 @@
-import { Routes, Route } from "react-router-dom";
+import { useState } from "react";
 import Interview from "./pages/Interview";
+import Result from "./pages/Result";
 import MobileJoin from "./pages/MobileJoin";
 
 function App() {
-  return (
-    <Routes>
-      <Route path="/" element={<Interview />} />
-      <Route path="/mobile" element={<MobileJoin />} />
-    {/* <Route path="/result" element={<Result />} />  */}
-    </Routes>
+  const [page, setPage] = useState(
+    window.location.pathname === "/mobile" ? "mobile" : "interview"
   );
+  const [result, setResult] = useState(null);
+
+  if (page === "mobile") return <MobileJoin />;
+  if (page === "result") return <Result result={result} />;
+
+  return <Interview setPage={setPage} setResult={setResult} />;
 }
 
 export default App;

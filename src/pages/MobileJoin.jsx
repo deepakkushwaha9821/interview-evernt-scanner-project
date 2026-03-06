@@ -1,58 +1,55 @@
 import { useRef, useState } from "react";
+import { startMobileCamera } from "../camera/mobileCamera";
+import { connectMobile } from "../socket/mobileSocket";
 
-export default function MobileJoin() {
+export default function MobileJoin(){
+
   const videoRef = useRef(null);
   const [code, setCode] = useState("");
-  const [connected, setConnected] = useState(false);
 
-  const startCamera = async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: "environment" } },
-      audio: false,
-    });
+  const joinInterview = async () => {
 
-    videoRef.current.srcObject = stream;
-    await videoRef.current.play();
-  };
+    // start mobile camera
+    await startMobileCamera(videoRef);
 
-  const connect = () => {
-    if (!code.trim()) return;
+    // connect websocket
+    const socket = connectMobile(code);
 
-    // 🔥 THIS IS THE PAIRING SIGNAL
-    localStorage.setItem("MOBILE_CONNECTED_CODE", code.toUpperCase());
-    setConnected(true);
+    socket.onopen = () => {
+
+      console.log("Mobile connected");
+
+      socket.send(JSON.stringify({
+        type: "mobile_joined",
+        pairCode: code
+      }));
+
+    };
+
   };
 
   return (
-    <div style={{ padding: "20px" }}>
-      <h2>Mobile Camera</h2>
+    <div>
+
+      <h2>Join Interview</h2>
 
       <input
-        placeholder="Enter pairing code"
+        placeholder="Enter Pair Code"
         value={code}
-        onChange={(e) => setCode(e.target.value)}
-        style={{ padding: "8px", width: "100%" }}
+        onChange={(e)=>setCode(e.target.value)}
       />
 
-      <button onClick={connect} style={{ marginTop: "10px" }}>
-        Connect
+      <button onClick={joinInterview}>
+        Start Mobile Camera
       </button>
-
-      {connected && <p>✅ Connected</p>}
-
-      <hr />
 
       <video
         ref={videoRef}
         autoPlay
-        muted
         playsInline
-        style={{ width: "100%", borderRadius: "8px" }}
+        style={{width:"100%", marginTop:"20px"}}
       />
 
-      <button onClick={startCamera} style={{ marginTop: "10px" }}>
-        Start Camera
-      </button>
     </div>
   );
 }

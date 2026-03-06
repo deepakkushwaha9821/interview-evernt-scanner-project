@@ -1,28 +1,30 @@
-export async function startMobileCamera(videoRef) {
-  if (!videoRef.current) return;
+// export async function startMobileCamera(videoRef) {
+//   if (!videoRef.current) return;
 
+//   const stream = await navigator.mediaDevices.getUserMedia({
+//     video: { facingMode: "environment" },
+//     audio: false
+//   });
+
+//   videoRef.current.srcObject = stream;
+// }
+
+
+export const startMobileCamera = async (videoRef) => {
   try {
-    // 🔐 request camera
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
-        facingMode: { ideal: "environment" } // safer than strict
+        facingMode: "environment"
       },
       audio: false
     });
 
-    videoRef.current.srcObject = stream;
-    videoRef.current.play();
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+    }
 
-    console.log("✅ Mobile camera started");
+    return stream;
   } catch (err) {
-    console.error("❌ Mobile camera error:", err);
-
-    alert(
-      "Camera permission denied.\n\n" +
-      "Please:\n" +
-      "1. Allow camera access\n" +
-      "2. Use HTTPS\n" +
-      "3. Open in Chrome / Safari\n"
-    );
+    console.error("Mobile camera error:", err);
   }
-}
+};
