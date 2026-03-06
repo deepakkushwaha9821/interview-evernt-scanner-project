@@ -1,6 +1,6 @@
 export function connectLaptop(pairCode) {
 
-  const socket = new WebSocket("ws://127.0.0.1:8000/ws");
+  const socket =new WebSocket("wss://deedrop1140-event-project.hf.space/ws");
 
   socket.onopen = () => {
     console.log("WebSocket connected");
@@ -20,4 +20,5 @@ export function connectLaptop(pairCode) {
   };
 
   return socket;
+
 }
