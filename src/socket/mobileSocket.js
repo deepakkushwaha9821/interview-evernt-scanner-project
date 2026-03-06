@@ -25,7 +25,7 @@
 
 export function connectMobile(pairCode) {
 
-  const socket = new WebSocket("ws://127.0.0.1:8000/ws");
+  const socket = new WebSocket("wss://deedrop1140-event-project.hf.space/ws");
 
   socket.onopen = () => {
 
@@ -48,4 +48,5 @@ export function connectMobile(pairCode) {
   };
 
   return socket;
+
 }
