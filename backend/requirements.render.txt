@@ -1,0 +1,2 @@
+# Extra packages for production deployment on Render
+psycopg2-binary==2.9.10

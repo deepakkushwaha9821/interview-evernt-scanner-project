@@ -1,0 +1,221 @@
+import argparse
+import json
+from pathlib import Path
+from typing import Dict, List
+
+
+DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
+DEFAULT_SYSTEM_PROMPT = (
+	"You are a helpful Python interview assistant. "
+	"Answer clearly and briefly."
+)
+
+
+def _read_jsonl(path: Path) -> List[Dict]:
+	rows: List[Dict] = []
+	with path.open("r", encoding="utf-8") as f:
+		for line_no, line in enumerate(f, start=1):
+			line = line.strip()
+			if not line:
+				continue
+			try:
+				rows.append(json.loads(line))
+			except json.JSONDecodeError as exc:
+				raise ValueError(f"Invalid JSONL at line {line_no}: {exc}") from exc
+	return rows
+
+
+def convert_qa_to_qwen_chat(
+	input_path: Path,
+	output_path: Path,
+	system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+) -> int:
+	"""Convert {question,answer} JSONL rows into Qwen chat-style JSONL rows."""
+	raw_rows = _read_jsonl(input_path)
+
+	converted = 0
+	output_path.parent.mkdir(parents=True, exist_ok=True)
+
+	with output_path.open("w", encoding="utf-8") as out:
+		for idx, row in enumerate(raw_rows, start=1):
+			question = (row.get("question") or "").strip()
+			answer = (row.get("answer") or "").strip()
+
+			if not question or not answer:
+				continue
+
+			sample = {
+				"messages": [
+					{"role": "system", "content": system_prompt},
+					{"role": "user", "content": question},
+					{"role": "assistant", "content": answer},
+				],
+				"meta": {"source_index": idx},
+			}
+			out.write(json.dumps(sample, ensure_ascii=False) + "\n")
+			converted += 1
+
+	return converted
+
+
+def train_qwen_lora(
+	train_file: Path,
+	output_dir: Path,
+	base_model: str = DEFAULT_BASE_MODEL,
+	epochs: int = 2,
+	batch_size: int = 1,
+	grad_accum: int = 8,
+	learning_rate: float = 2e-4,
+):
+	"""LoRA fine-tuning for a small Qwen model using TRL SFTTrainer."""
+	try:
+		import torch
+		from datasets import load_dataset
+		from peft import LoraConfig
+		from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
+		from trl import SFTTrainer
+	except ImportError as exc:
+		raise RuntimeError(
+			"Missing training dependencies. Install: "
+			"pip install transformers datasets accelerate peft trl bitsandbytes"
+		) from exc
+
+	if not train_file.exists():
+		raise FileNotFoundError(f"Training file not found: {train_file}")
+
+	output_dir.mkdir(parents=True, exist_ok=True)
+
+	dataset = load_dataset("json", data_files={"train": str(train_file)})["train"]
+
+	tokenizer = AutoTokenizer.from_pretrained(base_model, use_fast=True)
+	if tokenizer.pad_token is None:
+		tokenizer.pad_token = tokenizer.eos_token
+
+	use_cuda = torch.cuda.is_available()
+	if not use_cuda:
+		print("Warning: CUDA not detected. Fine-tuning Qwen on CPU will be very slow.")
+
+	dtype = torch.float16 if use_cuda else torch.float32
+
+	model = AutoModelForCausalLM.from_pretrained(
+		base_model,
+		torch_dtype=dtype,
+		device_map="auto" if use_cuda else None,
+	)
+
+	# Target projection layers commonly used in Qwen LoRA fine-tuning.
+	peft_config = LoraConfig(
+		r=16,
+		lora_alpha=32,
+		lora_dropout=0.05,
+		bias="none",
+		task_type="CAUSAL_LM",
+		target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "up_proj", "down_proj"],
+	)
+
+	training_args = TrainingArguments(
+		output_dir=str(output_dir),
+		per_device_train_batch_size=batch_size,
+		gradient_accumulation_steps=grad_accum,
+		num_train_epochs=epochs,
+		learning_rate=learning_rate,
+		logging_steps=10,
+		save_strategy="epoch",
+		bf16=use_cuda and torch.cuda.is_bf16_supported(),
+		fp16=use_cuda and not torch.cuda.is_bf16_supported(),
+		report_to="none",
+	)
+
+	def format_chat(example: Dict) -> str:
+		messages = example["messages"]
+		return tokenizer.apply_chat_template(
+			messages,
+			tokenize=False,
+			add_generation_prompt=False,
+		)
+
+	trainer = SFTTrainer(
+		model=model,
+		tokenizer=tokenizer,
+		train_dataset=dataset,
+		peft_config=peft_config,
+		args=training_args,
+		formatting_func=format_chat,
+		max_seq_length=1024,
+	)
+
+	trainer.train()
+	trainer.model.save_pretrained(str(output_dir))
+	tokenizer.save_pretrained(str(output_dir))
+
+
+def main():
+	parser = argparse.ArgumentParser(
+		description="Convert QA dataset and fine-tune a small Qwen model with LoRA"
+	)
+	sub = parser.add_subparsers(dest="cmd", required=True)
+
+	p_prepare = sub.add_parser("prepare", help="Convert QA JSONL to Qwen chat JSONL")
+	p_prepare.add_argument(
+		"--input",
+		default="python_qa_only_dataset.jsonl",
+		help="Input JSONL with question/answer fields",
+	)
+	p_prepare.add_argument(
+		"--output",
+		default="finetune_data_qwen_chat.jsonl",
+		help="Output JSONL in chat-message format",
+	)
+	p_prepare.add_argument(
+		"--system-prompt",
+		default=DEFAULT_SYSTEM_PROMPT,
+		help="System prompt used in each training sample",
+	)
+
+	p_train = sub.add_parser("train", help="Run LoRA fine-tuning on Qwen")
+	p_train.add_argument(
+		"--train-file",
+		default="finetune_data_qwen_chat.jsonl",
+		help="Prepared chat dataset JSONL",
+	)
+	p_train.add_argument(
+		"--output-dir",
+		default="qwen2_5_0_5b_lora",
+		help="Directory to save adapter/tokenizer",
+	)
+	p_train.add_argument(
+		"--base-model",
+		default=DEFAULT_BASE_MODEL,
+		help="Base model id from Hugging Face",
+	)
+	p_train.add_argument("--epochs", type=int, default=2)
+	p_train.add_argument("--batch-size", type=int, default=1)
+	p_train.add_argument("--grad-accum", type=int, default=8)
+	p_train.add_argument("--lr", type=float, default=2e-4)
+
+	args = parser.parse_args()
+
+	if args.cmd == "prepare":
+		converted = convert_qa_to_qwen_chat(
+			input_path=Path(args.input),
+			output_path=Path(args.output),
+			system_prompt=args.system_prompt,
+		)
+		print(f"Prepared {converted} chat training rows: {args.output}")
+		return
+
+	if args.cmd == "train":
+		train_qwen_lora(
+			train_file=Path(args.train_file),
+			output_dir=Path(args.output_dir),
+			base_model=args.base_model,
+			epochs=args.epochs,
+			batch_size=args.batch_size,
+			grad_accum=args.grad_accum,
+			learning_rate=args.lr,
+		)
+		print(f"Training complete. Adapter saved to: {args.output_dir}")
+
+
+if __name__ == "__main__":
+	main()
