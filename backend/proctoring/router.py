@@ -66,8 +66,11 @@ def latest(pairCode: str):
         updated_at = entry.get("updated_at", 0)
         connected = (time.time() - updated_at) <= 6
 
+    frame_path = os.path.join(FRAMES_DIR, f"{pairCode}.jpg")
+    frame_url = f"/frames/{pairCode}.jpg" if os.path.exists(frame_path) else None
+
     return {
-        "frame": f"/frames/{pairCode}.jpg",
+        "frame": frame_url,
         "detection": detection,
         "connected": connected
     }
