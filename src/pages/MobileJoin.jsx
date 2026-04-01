@@ -115,7 +115,7 @@
 
 
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { startMobileCamera } from "../camera/mobileCamera";
 import { connectMobile } from "../socket/mobileSocket";
 import { startMobileRecording } from "../utils/recordMobile";
@@ -128,12 +128,17 @@ export default function MobileJoin(){
   const isCodeEntered = code.trim().length > 0;
 
   const recorderRef = useRef(null);
+  const frameIntervalRef = useRef(null);
 
 
   // Send frames for AI detection
   const sendFrames = (video, pairCode) => {
 
-    setInterval(async () => {
+    if (frameIntervalRef.current) {
+      clearInterval(frameIntervalRef.current);
+    }
+
+    frameIntervalRef.current = setInterval(async () => {
 
       if (!video.videoWidth) return;
 
@@ -199,7 +204,20 @@ export default function MobileJoin(){
 
     }
 
+    if (frameIntervalRef.current) {
+      clearInterval(frameIntervalRef.current);
+      frameIntervalRef.current = null;
+    }
+
   };
+
+  useEffect(() => {
+    return () => {
+      if (frameIntervalRef.current) {
+        clearInterval(frameIntervalRef.current);
+      }
+    };
+  }, []);
 
 
   return (
