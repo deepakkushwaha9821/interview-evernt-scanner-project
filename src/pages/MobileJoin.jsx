@@ -167,29 +167,37 @@ export default function MobileJoin(){
 
 
   const joinInterview = async () => {
+    try {
+      // start camera
+      const stream = await startMobileCamera(videoRef);
+      if (!stream) {
+        alert("Camera permission is required to join mobile interview.");
+        return;
+      }
 
-    // start camera
-    const stream = await startMobileCamera(videoRef);
+      // start recording
+      recorderRef.current = await startMobileRecording(code, stream);
 
-    // start recording
-    recorderRef.current = await startMobileRecording(code, stream);
+      // connect websocket
+      const socket = connectMobile(code);
 
-    // connect websocket
-    const socket = connectMobile(code);
+      socket.onopen = () => {
 
-    socket.onopen = () => {
+        console.log("Mobile connected");
 
-      console.log("Mobile connected");
+        socket.send(JSON.stringify({
+          type: "mobile_joined",
+          pairCode: code
+        }));
 
-      socket.send(JSON.stringify({
-        type: "mobile_joined",
-        pairCode: code
-      }));
+        // start frame sending
+        sendFrames(videoRef.current, code);
 
-      // start frame sending
-      sendFrames(videoRef.current, code);
-
-    };
+      };
+    } catch (error) {
+      console.error("Failed to join mobile interview:", error);
+      alert("Unable to start mobile recording. Please allow camera access and try again.");
+    }
 
   };
 

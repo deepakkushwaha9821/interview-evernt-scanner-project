@@ -26,5 +26,6 @@ export const startMobileCamera = async (videoRef) => {
     return stream;
   } catch (err) {
     console.error("Mobile camera error:", err);
+    return null;
   }
 };

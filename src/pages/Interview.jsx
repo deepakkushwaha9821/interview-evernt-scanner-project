@@ -70,24 +70,33 @@ function Interview({ setPage, setResult }) {
   // -------------------------
   useEffect(() => {
     const start = async () => {
-      const stream = await startLaptopCamera(laptopVideoRef);
-      const res = await startInterview();
-      setSessionId(res.session_id);
-      setQuestion(res.question);
-      speak(res.question);
-      laptopRecorderRef.current = await startLaptopRecording(pairCode, stream);
+      try {
+        const stream = await startLaptopCamera(laptopVideoRef);
+        const res = await startInterview();
+        setSessionId(res.session_id);
+        setQuestion(res.question);
+        speak(res.question);
 
-      const socket = connectLaptop(pairCode);
-      socket.onmessage = (event) => {
-        const msg = JSON.parse(event.data);
-        if (msg.type === "mobile_joined") {
-          setMobileConnected(true);
+        if (stream) {
+          laptopRecorderRef.current = await startLaptopRecording(pairCode, stream);
+        } else {
+          console.warn("Laptop camera not available; continuing without laptop recording");
         }
-        if (msg.type === "cheating_update") {
-          setCheatingScore(msg.score);
-          setVerdict(msg.verdict);
-        }
-      };
+
+        const socket = connectLaptop(pairCode);
+        socket.onmessage = (event) => {
+          const msg = JSON.parse(event.data);
+          if (msg.type === "mobile_joined") {
+            setMobileConnected(true);
+          }
+          if (msg.type === "cheating_update") {
+            setCheatingScore(msg.score);
+            setVerdict(msg.verdict);
+          }
+        };
+      } catch (error) {
+        console.error("Interview initialization failed:", error);
+      }
     };
     start();
   }, [pairCode]);
@@ -130,7 +139,9 @@ function Interview({ setPage, setResult }) {
   useEffect(() => {
     detectTabSwitch(sendEvent);
     detectScreenSwitch(sendEvent);
-    detectVoice(sendEvent);
+    detectVoice(sendEvent).catch((error) => {
+      console.warn("Voice detection unavailable:", error);
+    });
   }, []);
 
 

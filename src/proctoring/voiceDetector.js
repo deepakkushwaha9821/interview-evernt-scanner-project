@@ -1,8 +1,14 @@
 export async function detectVoice(sendEvent){
 
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: true
-  });
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: true
+    });
+  } catch (error) {
+    console.warn("Voice permission denied or unavailable", error);
+    throw error;
+  }
 
   const audioContext = new AudioContext();
   const source = audioContext.createMediaStreamSource(stream);

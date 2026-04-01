@@ -2,6 +2,10 @@ import { API_BASE } from "../services/apiBase";
 
 export const startLaptopRecording = async (sessionId, stream) => {
 
+  if (!(stream instanceof MediaStream)) {
+    throw new Error("Laptop recording requires a valid media stream");
+  }
+
   const recorder = new MediaRecorder(stream);
 
   const chunks = [];

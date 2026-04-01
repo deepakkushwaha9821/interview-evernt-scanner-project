@@ -55,6 +55,10 @@ import { API_BASE } from "../services/apiBase";
 
 export const startMobileRecording = async (sessionId, stream) => {
 
+  if (!(stream instanceof MediaStream)) {
+    throw new Error("Mobile recording requires a valid media stream");
+  }
+
   const recorder = new MediaRecorder(stream);
 
   const chunks = [];

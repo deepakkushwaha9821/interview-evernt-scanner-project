@@ -25,5 +25,6 @@ export const startLaptopCamera = async (videoRef) => {
     return stream;
   } catch (err) {
     console.error("Laptop camera error:", err);
+    return null;
   }
 };
