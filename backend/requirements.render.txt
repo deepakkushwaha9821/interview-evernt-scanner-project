@@ -1,2 +1,8 @@
 # Extra packages for production deployment on Render
 psycopg2-binary==2.9.10
+
+# Proctoring runtime deps
+opencv-python-headless==4.10.0.84
+mediapipe==0.10.14
+ultralytics==8.3.12
+numpy<2
