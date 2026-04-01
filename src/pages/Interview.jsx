@@ -108,6 +108,8 @@ function Interview({ setPage, setResult }) {
           setMobileFrame(
             `${API_BASE}${data.frame}?${Date.now()}`
           );
+        } else {
+          setMobileFrame(null);
         }
         if (data.detection) {
           setDetection(data.detection);
