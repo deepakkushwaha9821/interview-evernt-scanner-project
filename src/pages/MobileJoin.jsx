@@ -168,6 +168,11 @@ export default function MobileJoin(){
 
   const joinInterview = async () => {
     try {
+      const normalizedCode = code.trim().toUpperCase();
+      if (!normalizedCode) {
+        return;
+      }
+
       // start camera
       const stream = await startMobileCamera(videoRef);
       if (!stream) {
@@ -176,10 +181,13 @@ export default function MobileJoin(){
       }
 
       // start recording
-      recorderRef.current = await startMobileRecording(code, stream);
+      recorderRef.current = await startMobileRecording(normalizedCode, stream);
+
+      // start frame sending regardless of websocket status
+      sendFrames(videoRef.current, normalizedCode);
 
       // connect websocket
-      const socket = connectMobile(code);
+      const socket = connectMobile(normalizedCode);
 
       socket.onopen = () => {
 
@@ -187,11 +195,8 @@ export default function MobileJoin(){
 
         socket.send(JSON.stringify({
           type: "mobile_joined",
-          pairCode: code
+          pairCode: normalizedCode
         }));
-
-        // start frame sending
-        sendFrames(videoRef.current, code);
 
       };
     } catch (error) {
