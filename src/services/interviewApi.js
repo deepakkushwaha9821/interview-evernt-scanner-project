@@ -1,22 +1,17 @@
 import axios from "axios";
+import { API_BASE } from "./apiBase";
 
-const API = "https://deedrop1140-event-project.hf.space";
+const API = `${API_BASE}/interview`;
 
-export async function startInterview() {
-
-  const res = await axios.post(`${API}/interview/start`);
-
+export const startInterview = async () => {
+  const res = await axios.post(`${API}/start`);
   return res.data;
+};
 
-}
-
-export async function submitAnswer(sessionId, answer) {
-
-  const res = await axios.post(`${API}/interview/answer`, {
+export const submitAnswer = async (sessionId, answer) => {
+  const res = await axios.post(`${API}/answer`, {
     session_id: sessionId,
-    answer: answer
+    answer
   });
-
   return res.data;
-
-}
+};

@@ -23,9 +23,11 @@
 // }
 
 
+import { WS_BASE } from "../services/apiBase";
+
 export function connectMobile(pairCode) {
 
-  const socket = new WebSocket("wss://deedrop1140-event-project.hf.space/ws");
+  const socket = new WebSocket(`${WS_BASE}/ws`);
 
   socket.onopen = () => {
 
@@ -48,5 +50,4 @@ export function connectMobile(pairCode) {
   };
 
   return socket;
-
 }

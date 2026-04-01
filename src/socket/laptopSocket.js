@@ -1,6 +1,8 @@
+import { WS_BASE } from "../services/apiBase";
+
 export function connectLaptop(pairCode) {
 
-  const socket =new WebSocket("wss://deedrop1140-event-project.hf.space/ws");
+  const socket = new WebSocket(`${WS_BASE}/ws`);
 
   socket.onopen = () => {
     console.log("WebSocket connected");
@@ -20,5 +22,4 @@ export function connectLaptop(pairCode) {
   };
 
   return socket;
-
 }
