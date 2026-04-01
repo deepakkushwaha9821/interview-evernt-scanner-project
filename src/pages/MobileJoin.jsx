@@ -187,18 +187,7 @@ export default function MobileJoin(){
       sendFrames(videoRef.current, normalizedCode);
 
       // connect websocket
-      const socket = connectMobile(normalizedCode);
-
-      socket.onopen = () => {
-
-        console.log("Mobile connected");
-
-        socket.send(JSON.stringify({
-          type: "mobile_joined",
-          pairCode: normalizedCode
-        }));
-
-      };
+      connectMobile(normalizedCode);
     } catch (error) {
       console.error("Failed to join mobile interview:", error);
       alert("Unable to start mobile recording. Please allow camera access and try again.");
