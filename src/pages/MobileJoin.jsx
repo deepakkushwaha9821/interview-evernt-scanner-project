@@ -117,7 +117,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { startMobileCamera } from "../camera/mobileCamera";
-import { connectMobile } from "../socket/mobileSocket";
 import { startMobileRecording } from "../utils/recordMobile";
 import { sendFrame } from "../services/proctorApi";
 
@@ -186,8 +185,7 @@ export default function MobileJoin(){
       // start frame sending regardless of websocket status
       sendFrames(videoRef.current, normalizedCode);
 
-      // connect websocket
-      connectMobile(normalizedCode);
+      // WebSocket linking is optional; frame heartbeat drives mobile connection status.
     } catch (error) {
       console.error("Failed to join mobile interview:", error);
       alert("Unable to start mobile recording. Please allow camera access and try again.");

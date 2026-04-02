@@ -4,7 +4,6 @@ import { speak } from "../utils/speak";
 import { listen } from "../utils/listen";
 import { startLaptopCamera } from "../camera/laptopCamera";
 import { generatePairCode } from "../utils/generateQR";
-import { connectLaptop } from "../socket/laptopSocket";
 import { startLaptopRecording } from "../utils/recordLaptop";
 import { detectTabSwitch } from "../proctoring/tabSwitchDetector";
 import { detectScreenSwitch } from "../proctoring/screenSwitchDetector";
@@ -83,17 +82,7 @@ function Interview({ setPage, setResult }) {
           console.warn("Laptop camera not available; continuing without laptop recording");
         }
 
-        const socket = connectLaptop(pairCode);
-        socket.onmessage = (event) => {
-          const msg = JSON.parse(event.data);
-          if (msg.type === "mobile_joined") {
-            setMobileConnected(true);
-          }
-          if (msg.type === "cheating_update") {
-            setCheatingScore(msg.score);
-            setVerdict(msg.verdict);
-          }
-        };
+        // WebSocket updates are disabled for deploy stability; polling handles mobile link state.
       } catch (error) {
         console.error("Interview initialization failed:", error);
       }
