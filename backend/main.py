@@ -42,9 +42,8 @@
 
 print("MAIN SERVER LOADED")
 import os
-import re
 
-from fastapi import FastAPI, Request, Response, WebSocket
+from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -86,35 +85,6 @@ app = FastAPI(
     version="1.0"
 )
 
-def _normalize_origin(value: str) -> str:
-    return value.strip().rstrip("/")
-
-
-cors_origins = os.getenv(
-    "CORS_ORIGINS",
-    "https://interview-evernt-scanner-project-b1.vercel.app,http://localhost:5173,http://127.0.0.1:5173"
-)
-
-cors_allow_all = os.getenv("CORS_ALLOW_ALL", "false").strip().lower() == "true"
-
-origin_tokens = [
-    token for token in re.split(r"[,\n]+", cors_origins) if token.strip()
-]
-allowed_origins = [_normalize_origin(token) for token in origin_tokens]
-
-# Ensure known production frontend origin is always allowed.
-default_frontend_origin = "https://interview-evernt-scanner-project-b1.vercel.app"
-if default_frontend_origin not in allowed_origins:
-    allowed_origins.append(default_frontend_origin)
-cors_origin_regex = os.getenv(
-    "CORS_ORIGIN_REGEX",
-    r"https://([a-z0-9-]+\.)*(vercel\.app|onrender\.com)$"
-)
-
-if cors_allow_all:
-    allowed_origins = ["*"]
-    cors_origin_regex = None
-
 
 # ---------------------------------
 # CORS (React connection)
@@ -122,18 +92,14 @@ if cors_allow_all:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_origin_regex=cors_origin_regex,
+    allow_origins=[
+        "https://interview-evernt-scanner-project-b1.vercel.app",
+        "http://localhost:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.options("/{rest_of_path:path}")
-async def preflight_handler(rest_of_path: str, request: Request):
-    # Keep a concrete OPTIONS endpoint so proxies do not return 405 before CORS runs.
-    return Response(status_code=204)
 
 
 # ---------------------------------
