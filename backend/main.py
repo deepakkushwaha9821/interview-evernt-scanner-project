@@ -42,6 +42,7 @@
 
 print("MAIN SERVER LOADED")
 import os
+import re
 
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -85,11 +86,24 @@ app = FastAPI(
     version="1.0"
 )
 
+def _normalize_origin(value: str) -> str:
+    return value.strip().rstrip("/")
+
+
 cors_origins = os.getenv(
     "CORS_ORIGINS",
-    "http://localhost:5173,http://127.0.0.1:5173"
+    "https://interview-evernt-scanner-project-b1.vercel.app,http://localhost:5173,http://127.0.0.1:5173"
 )
-allowed_origins = [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
+
+origin_tokens = [
+    token for token in re.split(r"[,\n]+", cors_origins) if token.strip()
+]
+allowed_origins = [_normalize_origin(token) for token in origin_tokens]
+
+# Ensure known production frontend origin is always allowed.
+default_frontend_origin = "https://interview-evernt-scanner-project-b1.vercel.app"
+if default_frontend_origin not in allowed_origins:
+    allowed_origins.append(default_frontend_origin)
 cors_origin_regex = os.getenv(
     "CORS_ORIGIN_REGEX",
     r"https://.*\.vercel\.app"
