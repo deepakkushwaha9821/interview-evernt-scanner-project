@@ -64,7 +64,12 @@ from admin.routes import router as admin_router
 # database
 from database import Base, engine
 from models.user import User  # noqa: F401
-from storage_paths import FRAMES_DIR, RECORDINGS_DIR, ensure_storage_dirs
+from storage_paths import (
+    FRAMES_DIR,
+    RECORDINGS_DIR,
+    clear_frames_on_startup,
+    ensure_storage_dirs,
+)
 
 
 # ---------------------------------
@@ -73,6 +78,7 @@ from storage_paths import FRAMES_DIR, RECORDINGS_DIR, ensure_storage_dirs
 
 Base.metadata.create_all(bind=engine)
 ensure_storage_dirs()
+clear_frames_on_startup()
 
 
 # ---------------------------------
