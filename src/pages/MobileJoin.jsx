@@ -118,16 +118,18 @@
 import { useEffect, useRef, useState } from "react";
 import { startMobileCamera } from "../camera/mobileCamera";
 import { startMobileRecording } from "../utils/recordMobile";
-import { sendFrame } from "../services/proctorApi";
+import { connectMobile } from "../socket/mobileSocket";
 
 export default function MobileJoin(){
 
   const videoRef = useRef(null);
   const [code, setCode] = useState("");
+  const [uploadStatus, setUploadStatus] = useState("Enter pair code and start camera");
   const isCodeEntered = code.trim().length > 0;
 
   const recorderRef = useRef(null);
   const frameIntervalRef = useRef(null);
+  const wsClientRef = useRef(null);
 
 
   // Send frames for AI detection
@@ -150,15 +152,18 @@ export default function MobileJoin(){
 
       const image = canvas.toDataURL("image/jpeg", 0.6);
 
-      try {
-
-        const result = await sendFrame(pairCode, image);
-
-        console.log("Detection:", result);
-
-      } catch(err){
-        console.error("Frame send error", err);
+      if (!wsClientRef.current || !wsClientRef.current.isOpen()) {
+        setUploadStatus("Socket reconnecting...");
+        return;
       }
+
+      wsClientRef.current.send({
+        type: "frame",
+        image,
+        ts: Date.now()
+      });
+
+      setUploadStatus("Frames streaming over WebSocket");
 
     }, 2000);
 
@@ -176,19 +181,32 @@ export default function MobileJoin(){
       const stream = await startMobileCamera(videoRef);
       if (!stream) {
         alert("Camera permission is required to join mobile interview.");
+        setUploadStatus("Camera permission denied");
         return;
       }
 
       // start recording
       recorderRef.current = await startMobileRecording(normalizedCode, stream);
 
-      // start frame sending regardless of websocket status
-      sendFrames(videoRef.current, normalizedCode);
+      wsClientRef.current = connectMobile(normalizedCode, {
+        onOpen: () => {
+          setUploadStatus("WebSocket connected");
+        },
+        onClose: () => {
+          setUploadStatus("WebSocket disconnected, reconnecting...");
+        },
+        onError: () => {
+          setUploadStatus("WebSocket error while streaming");
+        }
+      });
 
-      // WebSocket linking is optional; frame heartbeat drives mobile connection status.
+      // start frame sending after camera is ready
+      sendFrames(videoRef.current, normalizedCode);
+      setUploadStatus("Camera started, sending frames...");
     } catch (error) {
       console.error("Failed to join mobile interview:", error);
       alert("Unable to start mobile recording. Please allow camera access and try again.");
+      setUploadStatus("Unable to start mobile interview");
     }
 
   };
@@ -201,6 +219,7 @@ export default function MobileJoin(){
       await recorderRef.current.stop();
 
       console.log("Mobile recording stopped");
+      setUploadStatus("Recording stopped");
 
     }
 
@@ -209,12 +228,21 @@ export default function MobileJoin(){
       frameIntervalRef.current = null;
     }
 
+    if (wsClientRef.current) {
+      wsClientRef.current.close();
+      wsClientRef.current = null;
+    }
+
   };
 
   useEffect(() => {
     return () => {
       if (frameIntervalRef.current) {
         clearInterval(frameIntervalRef.current);
+      }
+      if (wsClientRef.current) {
+        wsClientRef.current.close();
+        wsClientRef.current = null;
       }
     };
   }, []);
@@ -242,6 +270,8 @@ export default function MobileJoin(){
       >
         Stop Recording
       </button>
+
+      <p style={{marginTop:"12px", color:"#666"}}>{uploadStatus}</p>
 
       <video
         ref={videoRef}

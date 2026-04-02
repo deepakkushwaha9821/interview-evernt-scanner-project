@@ -59,7 +59,7 @@ function App() {
       {/* INTERVIEW */}
 
       <Route path="/interview" element={<Interview />} />
-      {/* <Route path="/mobile" element={<MobileJoin />} /> */}
+      <Route path="/mobile" element={<MobileJoin />} />
       <Route path="/interview/mobile" element={<MobileJoin />} />
       <Route path="/result" element={<Result />} />
 

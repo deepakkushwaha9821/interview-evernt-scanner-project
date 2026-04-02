@@ -8,11 +8,12 @@ import { startLaptopRecording } from "../utils/recordLaptop";
 import { detectTabSwitch } from "../proctoring/tabSwitchDetector";
 import { detectScreenSwitch } from "../proctoring/screenSwitchDetector";
 import { detectVoice } from "../proctoring/voiceDetector";
-import { API_BASE } from "../services/apiBase";
+import { connectLaptop } from "../socket/laptopSocket";
 
 function Interview({ setPage, setResult }) {
   const laptopVideoRef = useRef(null);
   const laptopRecorderRef = useRef(null);
+  const wsClientRef = useRef(null);
 
   const [sessionId, setSessionId] = useState(null);
   const [question, setQuestion] = useState("");
@@ -26,6 +27,7 @@ function Interview({ setPage, setResult }) {
 
   const [mobileFrame, setMobileFrame] = useState(null);
   const [detection, setDetection] = useState(null);
+  const [feedStatus, setFeedStatus] = useState("Waiting for mobile stream...");
 
   const colors = {
     bg: "#09090b",
@@ -46,22 +48,19 @@ function Interview({ setPage, setResult }) {
   // -------------------------
   // SEND EVENT TO BACKEND
   // -------------------------
-  const sendEvent = async (event) => {
-    try {
-      await fetch(`${API_BASE}/proctor/event`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          sessionId,
-          timestamp: Date.now(),
-          ...event
-        })
-      });
-    } catch (error) {
-      console.error("Event send failed", error);
+  const sendEvent = (event) => {
+    if (!wsClientRef.current) {
+      return;
     }
+
+    wsClientRef.current.send({
+      type: "cheating_event",
+      payload: {
+        sessionId,
+        timestamp: Date.now(),
+        ...event
+      }
+    });
   };
 
   // -------------------------
@@ -82,43 +81,63 @@ function Interview({ setPage, setResult }) {
           console.warn("Laptop camera not available; continuing without laptop recording");
         }
 
-        // WebSocket updates are disabled for deploy stability; polling handles mobile link state.
+        wsClientRef.current = connectLaptop(pairCode, {
+          onOpen: () => {
+            setFeedStatus("Waiting for mobile stream...");
+          },
+          onClose: () => {
+            setMobileConnected(false);
+            setFeedStatus("Socket disconnected, reconnecting...");
+          },
+          onMessage: (event) => {
+            try {
+              const msg = JSON.parse(event.data);
+
+              if (msg.type === "mobile_joined") {
+                setMobileConnected(true);
+                setFeedStatus("Mobile connected");
+                return;
+              }
+
+              if (msg.type === "mobile_disconnected") {
+                setMobileConnected(false);
+                setFeedStatus("Mobile not linked");
+                return;
+              }
+
+              if (msg.type === "frame_update") {
+                setMobileConnected(Boolean(msg.connected));
+                setMobileFrame(msg.image || null);
+                setDetection(msg.detection || null);
+                setFeedStatus(msg.connected ? "Live mobile feed" : "Mobile not linked");
+                return;
+              }
+
+              if (msg.type === "cheating_update") {
+                if (typeof msg.score === "number") {
+                  setCheatingScore(msg.score);
+                }
+                if (msg.verdict) {
+                  setVerdict(msg.verdict);
+                }
+              }
+            } catch (error) {
+              console.error("Failed to parse socket message", error);
+            }
+          }
+        });
       } catch (error) {
         console.error("Interview initialization failed:", error);
       }
     };
     start();
-  }, [pairCode]);
 
-
-  // -------------------------
-  // FETCH MOBILE FRAME + DETECTION
-  // -------------------------
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(
-          `${API_BASE}/proctor/latest/${pairCode}`
-        );
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data.frame) {
-          setMobileFrame(
-            `${API_BASE}${data.frame}?${Date.now()}`
-          );
-        } else {
-          setMobileFrame(null);
-        }
-        if (data.detection) {
-          setDetection(data.detection);
-        }
-        setMobileConnected(Boolean(data.connected));
-      } catch (err) {
-        setMobileConnected(false);
-        // keep polling even when one request fails
+    return () => {
+      if (wsClientRef.current) {
+        wsClientRef.current.close();
+        wsClientRef.current = null;
       }
-    }, 2000);
-    return () => clearInterval(interval);
+    };
   }, [pairCode]);
 
 
@@ -385,6 +404,10 @@ function Interview({ setPage, setResult }) {
                   src={mobileFrame}
                   alt="Mobile side camera"
                   style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  onError={() => {
+                    setMobileFrame(null);
+                    setFeedStatus("Frame unavailable, waiting for next upload...");
+                  }}
                 />
               ) : (
                 <div
@@ -397,7 +420,7 @@ function Interview({ setPage, setResult }) {
                     fontSize: "0.85rem"
                   }}
                 >
-                  Waiting for mobile stream...
+                  {feedStatus}
                 </div>
               )}
             </div>

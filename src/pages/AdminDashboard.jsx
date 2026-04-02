@@ -24,6 +24,17 @@ export default function AdminDashboard(){
 
           <h3>{v.session}</h3>
 
+          <h4>Latest Stored Frame</h4>
+          {v.latest_frame ? (
+            <img
+              src={`${API_BASE}/${v.latest_frame}`}
+              alt={`Latest frame for ${v.session}`}
+              style={{ width: "400px", borderRadius: "8px", display: "block" }}
+            />
+          ) : (
+            <p>No frame stored yet.</p>
+          )}
+
           <h4>Front View (Laptop)</h4>
           {v.laptop_video ? (
             <video width="400" controls>

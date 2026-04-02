@@ -1,25 +1,70 @@
 import { WS_BASE } from "../services/apiBase";
 
-export function connectLaptop(pairCode) {
+export function connectLaptop(pairCode, handlers = {}) {
 
-  const socket = new WebSocket(`${WS_BASE}/ws`);
+  let socket = null;
+  let reconnectTimer = null;
+  let closedByUser = false;
 
-  socket.onopen = () => {
-    console.log("WebSocket connected");
+  const reconnectDelayMs = 1500;
 
-    socket.send(JSON.stringify({
-      pairCode: pairCode,
-      role: "laptop"
-    }));
+  const openSocket = () => {
+    socket = new WebSocket(`${WS_BASE}/ws`);
+
+    socket.onopen = () => {
+      console.log("Laptop websocket connected");
+
+      socket.send(JSON.stringify({
+        type: "init",
+        pairCode,
+        role: "laptop"
+      }));
+
+      if (typeof handlers.onOpen === "function") {
+        handlers.onOpen();
+      }
+    };
+
+    socket.onmessage = (event) => {
+      if (typeof handlers.onMessage === "function") {
+        handlers.onMessage(event);
+      }
+    };
+
+    socket.onerror = (error) => {
+      console.log("Laptop websocket error:", error);
+      if (typeof handlers.onError === "function") {
+        handlers.onError(error);
+      }
+    };
+
+    socket.onclose = () => {
+      if (typeof handlers.onClose === "function") {
+        handlers.onClose();
+      }
+
+      if (!closedByUser) {
+        reconnectTimer = setTimeout(openSocket, reconnectDelayMs);
+      }
+    };
   };
 
-  socket.onmessage = (event) => {
-    console.log("Message from server:", event.data);
-  };
+  openSocket();
 
-  socket.onerror = (error) => {
-    console.log("WebSocket error:", error);
+  return {
+    send(payload) {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(payload));
+      }
+    },
+    close() {
+      closedByUser = true;
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
+      if (socket) {
+        socket.close();
+      }
+    }
   };
-
-  return socket;
 }
