@@ -1,6 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { FaceMesh } from "@mediapipe/face_mesh";
-import { drawConnectors, drawLandmarks } from "@mediapipe/drawing_utils";
 import { startInterview, stopInterview, submitAnswer } from "../services/interviewApi";
 import { speak } from "../utils/speak";
 import { listen } from "../utils/listen";
@@ -175,7 +173,7 @@ function Interview() {
         setDifficulty(res.difficulty || "medium");
         speak(res.question);
 
-        // --- Live FaceMesh Detection ---
+        // --- Live FaceMesh Detection (loaded from CDN at runtime) ---
         rafIdRef.current = null;
         let mesh = null;
         let warningCounter = 0;
@@ -184,53 +182,68 @@ function Interview() {
         let score50 = false;
         const video = laptopVideoRef.current;
         if (video && stream) {
-          mesh = new FaceMesh({
-            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+          // Load MediaPipe from CDN dynamically to avoid Vite bundling issues
+          const loadFaceMesh = () => new Promise((resolve) => {
+            if (window.FaceMesh) { resolve(window.FaceMesh); return; }
+            const script = document.createElement("script");
+            script.src = "https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js";
+            script.crossOrigin = "anonymous";
+            script.onload = () => resolve(window.FaceMesh);
+            script.onerror = () => resolve(null);
+            document.head.appendChild(script);
           });
-          mesh.setOptions({
-            maxNumFaces: 1,
-            refineLandmarks: true,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
-          });
-          mesh.onResults((results) => {
-            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-              const landmarks = results.multiFaceLandmarks[0];
-              // Head rotation detection (simple):
-              // Use nose (1), left eye (33), right eye (263)
-              const nose = landmarks[1];
-              const leftEye = landmarks[33];
-              const rightEye = landmarks[263];
-              // If nose.x is far from center, or eyes are not level, count as rotated
-              const headTurned = nose.x < 0.35 || nose.x > 0.65;
-              const eyesTilted = Math.abs(leftEye.y - rightEye.y) > 0.04;
-              if (headTurned || eyesTilted) {
-                warningCounter++;
-                setWarningCount((prev) => prev + 1);
-                if (warningCounter === 10 && !score10) {
-                  setCheatingScore((prev) => prev + 1);
-                  setWarningMessage("First warning: Please keep your head and eyes forward.");
-                  score10 = true;
-                } else if (warningCounter === 25 && !score25) {
-                  setCheatingScore((prev) => prev + 2);
-                  setWarningMessage("Second warning: Cheating detected. Please focus on the screen.");
-                  score25 = true;
-                } else if (warningCounter === 50 && !score50) {
-                  setCheatingScore((prev) => prev + 5);
-                  setWarningMessage("Final warning: Cheating score increased. Interview at risk.");
-                  score50 = true;
+
+          const FaceMeshClass = await loadFaceMesh();
+          if (FaceMeshClass) {
+            mesh = new FaceMeshClass({
+              locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+            });
+            mesh.setOptions({
+              maxNumFaces: 1,
+              refineLandmarks: true,
+              minDetectionConfidence: 0.5,
+              minTrackingConfidence: 0.5
+            });
+            mesh.onResults((results) => {
+              if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                const landmarks = results.multiFaceLandmarks[0];
+                const nose = landmarks[1];
+                const leftEye = landmarks[33];
+                const rightEye = landmarks[263];
+                const headTurned = nose.x < 0.35 || nose.x > 0.65;
+                const eyesTilted = Math.abs(leftEye.y - rightEye.y) > 0.04;
+                if (headTurned || eyesTilted) {
+                  warningCounter++;
+                  setWarningCount((prev) => prev + 1);
+                  if (warningCounter === 10 && !score10) {
+                    setCheatingScore((prev) => prev + 1);
+                    setWarningMessage("First warning: Please keep your head and eyes forward.");
+                    score10 = true;
+                  } else if (warningCounter === 25 && !score25) {
+                    setCheatingScore((prev) => prev + 2);
+                    setWarningMessage("Second warning: Cheating detected. Please focus on the screen.");
+                    score25 = true;
+                  } else if (warningCounter === 50 && !score50) {
+                    setCheatingScore((prev) => prev + 5);
+                    setWarningMessage("Final warning: Cheating score increased. Interview at risk.");
+                    score50 = true;
+                  }
                 }
               }
+            });
+            const detectFrame = async () => {
+              if (!video || stoppedRef.current) return;
+              await mesh.send({ image: video });
+              rafIdRef.current = requestAnimationFrame(detectFrame);
+            };
+            video.onloadeddata = () => {
+              rafIdRef.current = requestAnimationFrame(detectFrame);
+            };
+            // If video already loaded, start immediately
+            if (video.readyState >= 2) {
+              rafIdRef.current = requestAnimationFrame(detectFrame);
             }
-          });
-          const detectFrame = async () => {
-            if (!video || stoppedRef.current) return;
-            await mesh.send({ image: video });
-            rafIdRef.current = requestAnimationFrame(detectFrame);
-          };
-          video.onloadeddata = () => {
-            rafIdRef.current = requestAnimationFrame(detectFrame);
-          };
+          }
         }
         if (stream) {
           stream.getTracks().forEach((track) => {
