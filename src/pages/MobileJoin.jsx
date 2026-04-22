@@ -130,6 +130,7 @@ export default function MobileJoin(){
   const recorderRef = useRef(null);
   const frameIntervalRef = useRef(null);
   const wsClientRef = useRef(null);
+  const mobileStreamRef = useRef(null);
 
 
   // Send frames for AI detection
@@ -184,6 +185,7 @@ export default function MobileJoin(){
         setUploadStatus("Camera permission denied");
         return;
       }
+      mobileStreamRef.current = stream;
 
       // start recording
       recorderRef.current = await startMobileRecording(normalizedCode, stream);
@@ -191,6 +193,17 @@ export default function MobileJoin(){
       wsClientRef.current = connectMobile(normalizedCode, {
         onOpen: () => {
           setUploadStatus("WebSocket connected");
+        },
+        onMessage: (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            if (payload.type === "stop_interview") {
+              stopRecording("stopped_by_laptop");
+              setUploadStatus("Interview stopped from laptop");
+            }
+          } catch (error) {
+            console.error("Failed to parse mobile socket message:", error);
+          }
         },
         onClose: () => {
           setUploadStatus("WebSocket disconnected, reconnecting...");
@@ -212,14 +225,15 @@ export default function MobileJoin(){
   };
 
 
-  const stopRecording = async () => {
+  const stopRecording = async (reason = "manual") => {
 
     if (recorderRef.current) {
 
       await recorderRef.current.stop();
+      recorderRef.current = null;
 
       console.log("Mobile recording stopped");
-      setUploadStatus("Recording stopped");
+      setUploadStatus(`Recording stopped (${reason})`);
 
     }
 
@@ -233,6 +247,15 @@ export default function MobileJoin(){
       wsClientRef.current = null;
     }
 
+    if (mobileStreamRef.current) {
+      mobileStreamRef.current.getTracks().forEach((track) => track.stop());
+      mobileStreamRef.current = null;
+    }
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+
   };
 
   useEffect(() => {
@@ -243,6 +266,10 @@ export default function MobileJoin(){
       if (wsClientRef.current) {
         wsClientRef.current.close();
         wsClientRef.current = null;
+      }
+      if (mobileStreamRef.current) {
+        mobileStreamRef.current.getTracks().forEach((track) => track.stop());
+        mobileStreamRef.current = null;
       }
     };
   }, []);

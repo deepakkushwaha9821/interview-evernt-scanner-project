@@ -17,7 +17,7 @@ export default function AdminRegister() {
 
     setIsProcessing(true);
     try {
-      const res = await fetch(`${API_BASE}/auth/register`, {
+      const res = await fetch(`${API_BASE}/admin/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -33,7 +33,8 @@ export default function AdminRegister() {
         alert(data.message || "Admin registered successfully");
         navigate("/admin-login");
       } else {
-        alert(data.message || "Registration failed");
+        // FastAPI HTTPException returns { detail: "..." }, not { message: "..." }
+        alert(data.detail || "Registration failed");
       }
     } catch (error) {
       console.error("Register error:", error);
@@ -41,6 +42,10 @@ export default function AdminRegister() {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") register();
   };
 
   const styles = {
@@ -125,6 +130,7 @@ export default function AdminRegister() {
           value={username}
           style={styles.input}
           onChange={(e) => setUsername(e.target.value)}
+          onKeyDown={handleKeyDown}
         />
 
         <motion.input
@@ -134,6 +140,7 @@ export default function AdminRegister() {
           value={password}
           style={styles.input}
           onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={handleKeyDown}
         />
 
         <motion.button

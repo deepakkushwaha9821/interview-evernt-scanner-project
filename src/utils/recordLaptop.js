@@ -7,6 +7,7 @@ export const startLaptopRecording = async (sessionId, stream) => {
   }
 
   const recorder = new MediaRecorder(stream);
+  let hasStopped = false;
 
   const chunks = [];
 
@@ -22,25 +23,44 @@ export const startLaptopRecording = async (sessionId, stream) => {
 
     stop: async () => {
 
-      return new Promise((resolve) => {
+      if (hasStopped || recorder.state === "inactive") {
+        return;
+      }
+
+      hasStopped = true;
+
+      return new Promise((resolve, reject) => {
 
         recorder.onstop = async () => {
+
+          if (!chunks.length) {
+            resolve();
+            return;
+          }
 
           const blob = new Blob(chunks, { type: "video/webm" });
 
           const form = new FormData();
           form.append("session_id", sessionId);
           form.append("role", "laptop");
-          form.append("video", blob);
+          form.append("video", blob, "laptop_video.webm");
 
-          await fetch(`${API_BASE}/proctor/upload-video`, {
-            method: "POST",
-            body: form
-          });
+          try {
+            const res = await fetch(`${API_BASE}/proctor/upload-video`, {
+              method: "POST",
+              body: form
+            });
 
-          console.log("Laptop video uploaded");
+            if (!res.ok) {
+              throw new Error(`Laptop upload failed with status ${res.status}`);
+            }
 
-          resolve();
+            console.log("Laptop video uploaded");
+            resolve();
+          } catch (error) {
+            console.error("Laptop upload error:", error);
+            reject(error);
+          }
         };
 
         recorder.stop();

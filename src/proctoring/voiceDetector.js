@@ -18,7 +18,7 @@ export async function detectVoice(sendEvent){
 
   const data = new Uint8Array(analyser.frequencyBinCount);
 
-  setInterval(() => {
+  const intervalId = setInterval(() => {
 
     analyser.getByteFrequencyData(data)
 
@@ -33,5 +33,12 @@ export async function detectVoice(sendEvent){
     }
 
   },2000)
+
+  return () => {
+    clearInterval(intervalId);
+    source.disconnect();
+    stream.getTracks().forEach((track) => track.stop());
+    audioContext.close().catch(() => {});
+  };
 
 }

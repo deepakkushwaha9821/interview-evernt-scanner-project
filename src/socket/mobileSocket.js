@@ -46,6 +46,12 @@ export function connectMobile(pairCode, handlers = {}) {
         role: "mobile"
       }));
 
+      // Backward-compatible handshake: explicitly notify laptop side.
+      socket.send(JSON.stringify({
+        type: "mobile_joined",
+        pairCode
+      }));
+
       if (typeof handlers.onOpen === "function") {
         handlers.onOpen();
       }

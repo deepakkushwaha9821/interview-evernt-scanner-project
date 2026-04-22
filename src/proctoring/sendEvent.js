@@ -1,7 +1,8 @@
-import { sendEvent } from "../proctoring/sendEvent";
+import { API_BASE } from "../services/apiBase";
+
 export function sendEvent(event){
 
-  fetch("http://localhost:8000/proctor/event",{
+  fetch(`${API_BASE}/proctor/event`,{
     method:"POST",
     headers:{
       "Content-Type":"application/json"

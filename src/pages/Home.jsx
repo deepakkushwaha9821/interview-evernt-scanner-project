@@ -7,9 +7,9 @@ export default function Home() {
   // Animation variants for the container
   const containerVars = {
     hidden: { opacity: 0 },
-    visible: { 
-      opacity: 1, 
-      transition: { staggerChildren: 0.2, delayChildren: 0.3 } 
+    visible: {
+      opacity: 1,
+      transition: { staggerChildren: 0.2, delayChildren: 0.3 }
     }
   };
 
@@ -92,7 +92,7 @@ export default function Home() {
         borderRadius: "50%", top: "20%", left: "30%"
       }} />
 
-      <motion.div 
+      <motion.div
         variants={containerVars}
         initial="hidden"
         animate="visible"
@@ -101,13 +101,13 @@ export default function Home() {
         <motion.h1 variants={itemVars} style={styles.title}>
           AI Interview System
         </motion.h1>
-        
+
         <motion.p variants={itemVars} style={styles.subtitle}>
           Select your portal to continue
         </motion.p>
 
         <motion.div variants={itemVars} style={styles.buttonGroup}>
-          <motion.button 
+          <motion.button
             whileHover={{ scale: 1.05, backgroundColor: "rgba(255, 255, 255, 0.2)" }}
             whileTap={{ scale: 0.98 }}
             style={{ ...styles.btnBase, ...styles.btnAdmin }}
@@ -116,7 +116,7 @@ export default function Home() {
             Admin Portal
           </motion.button>
 
-          <motion.button 
+          <motion.button
             whileHover={{ scale: 1.05, filter: "brightness(1.2)" }}
             whileTap={{ scale: 0.98 }}
             style={{ ...styles.btnBase, ...styles.btnUser }}

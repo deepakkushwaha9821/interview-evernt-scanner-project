@@ -35,12 +35,18 @@ import AdminDashboard from "./pages/AdminDashboard";
 import Interview from "./pages/Interview";
 import MobileJoin from "./pages/MobileJoin";
 import Result from "./pages/Result";
+import CandidateProfile from "./pages/CandidateProfile";
+import BackButton from "./components/BackButton";
 
 function App() {
 
   return (
 
-    <Routes>
+    <>
+
+      <BackButton />
+
+      <Routes>
 
       {/* Home */}
       <Route path="/" element={<Home />} />
@@ -49,6 +55,7 @@ function App() {
 
       <Route path="/user-login" element={<UserLogin />} />
       <Route path="/user-register" element={<UserRegister />} />
+      <Route path="/candidate-profile" element={<CandidateProfile />} />
 
       {/* ADMIN */}
 
@@ -63,7 +70,9 @@ function App() {
       <Route path="/interview/mobile" element={<MobileJoin />} />
       <Route path="/result" element={<Result />} />
 
-    </Routes>
+      </Routes>
+
+    </>
 
   );
 }

@@ -10,6 +10,10 @@ export default function AdminLogin() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const login = async () => {
+    if (!username || !password) {
+      alert("Please enter Admin ID and Security Key");
+      return;
+    }
     setIsLoggingIn(true);
     try {
       const res = await fetch(`${API_BASE}/auth/login`, {
@@ -19,6 +23,12 @@ export default function AdminLogin() {
       });
 
       const data = await res.json();
+
+      if (!res.ok) {
+        // FastAPI returns { detail: "..." } on errors
+        alert(data.detail || "Invalid credentials");
+        return;
+      }
 
       if (data.role === "admin") {
         navigate("/admin");
@@ -31,6 +41,10 @@ export default function AdminLogin() {
     } finally {
       setIsLoggingIn(false);
     }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") login();
   };
 
   const styles = {
@@ -120,6 +134,7 @@ export default function AdminLogin() {
           placeholder="Admin ID"
           style={styles.input}
           onChange={(e) => setUsername(e.target.value)}
+          onKeyDown={handleKeyDown}
         />
 
         <motion.input
@@ -128,6 +143,7 @@ export default function AdminLogin() {
           placeholder="Security Key"
           style={styles.input}
           onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={handleKeyDown}
         />
 
         <motion.button

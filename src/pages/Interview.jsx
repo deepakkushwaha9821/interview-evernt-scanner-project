@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { startInterview, submitAnswer } from "../services/interviewApi";
+import { FaceMesh } from "@mediapipe/face_mesh";
+import { drawConnectors, drawLandmarks } from "@mediapipe/drawing_utils";
+import { startInterview, stopInterview, submitAnswer } from "../services/interviewApi";
 import { speak } from "../utils/speak";
 import { listen } from "../utils/listen";
 import { startLaptopCamera } from "../camera/laptopCamera";
@@ -9,25 +11,62 @@ import { detectTabSwitch } from "../proctoring/tabSwitchDetector";
 import { detectScreenSwitch } from "../proctoring/screenSwitchDetector";
 import { detectVoice } from "../proctoring/voiceDetector";
 import { connectLaptop } from "../socket/laptopSocket";
+import { API_BASE } from "../services/apiBase";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
-function Interview({ setPage, setResult }) {
+function Interview() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
   const laptopVideoRef = useRef(null);
+  const laptopStreamRef = useRef(null);
   const laptopRecorderRef = useRef(null);
   const wsClientRef = useRef(null);
+  const laptopFrameIntervalRef = useRef(null);
+  const rafIdRef = useRef(null);
+  const detectorCleanupRef = useRef([]);
+  const stoppedRef = useRef(false);
 
   const [sessionId, setSessionId] = useState(null);
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState("");
+  const [difficulty, setDifficulty] = useState("medium");
+  const [feedback, setFeedback] = useState("");
+
+  const topic = (searchParams.get("topic") || "python").toLowerCase();
+  const candidate = searchParams.get("candidate") || localStorage.getItem("candidate_username") || "Candidate";
+  const maxQuestions = Number(searchParams.get("maxQuestions") || 5);
 
   const [pairCode] = useState(generatePairCode());
   const [mobileConnected, setMobileConnected] = useState(false);
 
   const [cheatingScore, setCheatingScore] = useState(0);
+  const [warningCount, setWarningCount] = useState(0);
+  const [warningMessage, setWarningMessage] = useState("");
   const [verdict, setVerdict] = useState("Clean");
+
+  // Auto-update verdict whenever cheating score changes
+  useEffect(() => {
+    if (cheatingScore >= 8) setVerdict("Disqualified");
+    else if (cheatingScore >= 5) setVerdict("Critical");
+    else if (cheatingScore >= 3) setVerdict("Suspicious");
+    else setVerdict("Clean");
+  }, [cheatingScore]);
+
+  // Auto-terminate if laptop cheating score reaches 10
+  useEffect(() => {
+    if (cheatingScore >= 10 && !stoppedRef.current) {
+      setWarningMessage("🚨 Interview terminated: cheating score limit reached.");
+      speak("Interview terminated due to cheating detected.");
+      handleStopInterview();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cheatingScore]);
 
   const [mobileFrame, setMobileFrame] = useState(null);
   const [detection, setDetection] = useState(null);
   const [feedStatus, setFeedStatus] = useState("Waiting for mobile stream...");
+  const [proctoringStopped, setProctoringStopped] = useState(false);
 
   const colors = {
     bg: "#09090b",
@@ -49,7 +88,7 @@ function Interview({ setPage, setResult }) {
   // SEND EVENT TO BACKEND
   // -------------------------
   const sendEvent = (event) => {
-    if (!wsClientRef.current) {
+    if (stoppedRef.current || !wsClientRef.current || !sessionId) {
       return;
     }
 
@@ -63,6 +102,61 @@ function Interview({ setPage, setResult }) {
     });
   };
 
+  const cleanupInterviewResources = (reason = "manual_stop") => {
+    if (stoppedRef.current) {
+      return;
+    }
+
+    stoppedRef.current = true;
+    setProctoringStopped(true);
+
+    if (laptopFrameIntervalRef.current) {
+      clearInterval(laptopFrameIntervalRef.current);
+      laptopFrameIntervalRef.current = null;
+    }
+
+    detectorCleanupRef.current.forEach((cleanup) => {
+      try {
+        cleanup?.();
+      } catch (error) {
+        console.error("Detector cleanup failed:", error);
+      }
+    });
+    detectorCleanupRef.current = [];
+
+    const wsClient = wsClientRef.current;
+    wsClientRef.current = null;
+    if (wsClient) {
+      wsClient.close();
+    }
+
+    const recorder = laptopRecorderRef.current;
+    laptopRecorderRef.current = null;
+    if (recorder) {
+      recorder.stop().catch((error) => {
+        console.error("Laptop stop/upload failed:", error);
+      });
+    }
+
+    const stream = laptopStreamRef.current;
+    laptopStreamRef.current = null;
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+    }
+
+    if (laptopVideoRef.current) {
+      laptopVideoRef.current.srcObject = null;
+    }
+
+    setMobileConnected(false);
+    setFeedStatus(`Proctoring stopped (${reason})`);
+  };
+
+  const exitInterview = (route) => {
+    cleanupInterviewResources(`exit_to_${route.replace("/", "") || "home"}`);
+    navigate(route);
+  };
+
   // -------------------------
   // START INTERVIEW
   // -------------------------
@@ -70,13 +164,139 @@ function Interview({ setPage, setResult }) {
     const start = async () => {
       try {
         const stream = await startLaptopCamera(laptopVideoRef);
-        const res = await startInterview();
+        laptopStreamRef.current = stream || null;
+        const res = await startInterview({
+          topic,
+          candidateName: candidate,
+          maxQuestions,
+        });
         setSessionId(res.session_id);
         setQuestion(res.question);
+        setDifficulty(res.difficulty || "medium");
         speak(res.question);
 
+        // --- Live FaceMesh Detection ---
+        rafIdRef.current = null;
+        let mesh = null;
+        let warningCounter = 0;
+        let score10 = false;
+        let score25 = false;
+        let score50 = false;
+        const video = laptopVideoRef.current;
+        if (video && stream) {
+          mesh = new FaceMesh({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+          });
+          mesh.setOptions({
+            maxNumFaces: 1,
+            refineLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+          });
+          mesh.onResults((results) => {
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+              const landmarks = results.multiFaceLandmarks[0];
+              // Head rotation detection (simple):
+              // Use nose (1), left eye (33), right eye (263)
+              const nose = landmarks[1];
+              const leftEye = landmarks[33];
+              const rightEye = landmarks[263];
+              // If nose.x is far from center, or eyes are not level, count as rotated
+              const headTurned = nose.x < 0.35 || nose.x > 0.65;
+              const eyesTilted = Math.abs(leftEye.y - rightEye.y) > 0.04;
+              if (headTurned || eyesTilted) {
+                warningCounter++;
+                setWarningCount((prev) => prev + 1);
+                if (warningCounter === 10 && !score10) {
+                  setCheatingScore((prev) => prev + 1);
+                  setWarningMessage("First warning: Please keep your head and eyes forward.");
+                  score10 = true;
+                } else if (warningCounter === 25 && !score25) {
+                  setCheatingScore((prev) => prev + 2);
+                  setWarningMessage("Second warning: Cheating detected. Please focus on the screen.");
+                  score25 = true;
+                } else if (warningCounter === 50 && !score50) {
+                  setCheatingScore((prev) => prev + 5);
+                  setWarningMessage("Final warning: Cheating score increased. Interview at risk.");
+                  score50 = true;
+                }
+              }
+            }
+          });
+          const detectFrame = async () => {
+            if (!video || stoppedRef.current) return;
+            await mesh.send({ image: video });
+            rafIdRef.current = requestAnimationFrame(detectFrame);
+          };
+          video.onloadeddata = () => {
+            rafIdRef.current = requestAnimationFrame(detectFrame);
+          };
+        }
         if (stream) {
+          stream.getTracks().forEach((track) => {
+            track.addEventListener("ended", () => {
+              if (!stoppedRef.current) {
+                cleanupInterviewResources("camera_ended");
+              }
+            });
+          });
+
           laptopRecorderRef.current = await startLaptopRecording(pairCode, stream);
+
+          if (laptopFrameIntervalRef.current) {
+            clearInterval(laptopFrameIntervalRef.current);
+          }
+
+          laptopFrameIntervalRef.current = setInterval(async () => {
+            try {
+              const video = laptopVideoRef.current;
+              if (!video || !video.videoWidth || !video.videoHeight) return;
+
+              const hasLiveTrack = stream.getVideoTracks().some((track) => track.readyState === "live");
+              if (!hasLiveTrack) {
+                cleanupInterviewResources("camera_blocked");
+                return;
+              }
+
+              const canvas = document.createElement("canvas");
+              canvas.width = video.videoWidth;
+              canvas.height = video.videoHeight;
+              const ctx = canvas.getContext("2d");
+              if (!ctx) return;
+
+              ctx.drawImage(video, 0, 0);
+              const image = canvas.toDataURL("image/jpeg", 0.7);
+
+              const res = await fetch(`${API_BASE}/proctor/laptop-frame`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  pairCode,
+                  image
+                })
+              });
+              const data = await res.json();
+              if (data && typeof data.warnings === "number") {
+                setWarningCount(data.warnings);
+              }
+              // Use backend's authoritative running total score
+              if (data && typeof data.cheating_score === "number") {
+                setCheatingScore(data.cheating_score);
+              }
+              // Show warning message when suspicious activity detected this frame
+              if (data && data.cheating_score_delta > 0) {
+                if (data.face_count === 0) {
+                  setWarningMessage("⚠️ No face detected — please stay in frame!");
+                } else if (data.cheating_score_delta >= 2) {
+                  setWarningMessage("⚠️ Suspicious activity detected — please look at the screen.");
+                } else {
+                  setWarningMessage("⚠️ Attention warning — minor head/gaze deviation.");
+                }
+              }
+            } catch (error) {
+              console.error("Laptop frame upload failed:", error);
+            }
+          }, 10000); // every 10 seconds for more frequent detection
         } else {
           console.warn("Laptop camera not available; continuing without laptop recording");
         }
@@ -117,9 +337,20 @@ function Interview({ setPage, setResult }) {
                 if (typeof msg.score === "number") {
                   setCheatingScore(msg.score);
                 }
-                if (msg.verdict) {
-                  setVerdict(msg.verdict);
-                }
+              }
+
+              // Mobile detection → immediate termination
+              if (msg.type === "terminate_interview") {
+                const d = msg.detection || {};
+                let reason = "Cheating detected on mobile camera.";
+                if (d.phone) reason = "🚨 Phone detected! Interview terminated.";
+                else if (d.face === "multiple_people") reason = "🚨 Multiple people detected! Interview terminated.";
+                else if (d.face === "no_face") reason = "🚨 Candidate left frame! Interview terminated.";
+                else if (d.looking_away) reason = "🚨 Looking away detected! Interview terminated.";
+                setWarningMessage(reason);
+                speak(reason.replace(/[🚨⚠️]/g, ""));
+                // Small delay so the warning renders before navigating
+                setTimeout(() => handleStopInterview(), 1500);
               }
             } catch (error) {
               console.error("Failed to parse socket message", error);
@@ -133,23 +364,39 @@ function Interview({ setPage, setResult }) {
     start();
 
     return () => {
-      if (wsClientRef.current) {
-        wsClientRef.current.close();
-        wsClientRef.current = null;
-      }
+      cleanupInterviewResources("unmount");
+      if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
     };
-  }, [pairCode]);
+  }, [pairCode, topic, candidate, maxQuestions]);
 
 
   // -------------------------
   // PROCTORING DETECTORS
   // -------------------------
   useEffect(() => {
-    detectTabSwitch(sendEvent);
-    detectScreenSwitch(sendEvent);
+    const tabCleanup = detectTabSwitch(sendEvent);
+    const screenCleanup = detectScreenSwitch(sendEvent);
+    detectorCleanupRef.current.push(tabCleanup, screenCleanup);
+
     detectVoice(sendEvent).catch((error) => {
       console.warn("Voice detection unavailable:", error);
+      return null;
+    }).then((voiceCleanup) => {
+      if (voiceCleanup) {
+        detectorCleanupRef.current.push(voiceCleanup);
+      }
     });
+
+    return () => {
+      detectorCleanupRef.current.forEach((cleanup) => {
+        try {
+          cleanup?.();
+        } catch (error) {
+          console.error("Detector cleanup failed:", error);
+        }
+      });
+      detectorCleanupRef.current = [];
+    };
   }, []);
 
 
@@ -158,21 +405,54 @@ function Interview({ setPage, setResult }) {
   // -------------------------
   const handleSubmit = async () => {
     if (!answer.trim()) return;
-    const res = await submitAnswer(sessionId, answer);
+    const res = await submitAnswer(sessionId, answer, pairCode);
     setAnswer("");
+    if (res.evaluation?.feedback) {
+      setFeedback(res.evaluation.feedback);
+    }
+
     if (res.done) {
-      if (laptopRecorderRef.current) {
-        await laptopRecorderRef.current.stop();
-      }
+      cleanupInterviewResources("interview_done");
       speak(
         `Interview completed. ${res.final_verdict}. You scored ${res.score_percentage} percent.`
       );
-      setResult(res);
-      setPage("result");
+      navigate("/result", { state: { result: res } });
       return;
     }
+
     setQuestion(res.next_question);
+    setDifficulty(res.next_difficulty || "medium");
     speak(res.next_question);
+  };
+
+  const handleStopInterview = async () => {
+    try {
+      if (wsClientRef.current) {
+        wsClientRef.current.send({
+          type: "stop_interview",
+          pairCode,
+          reason: "manual_stop",
+        });
+      }
+
+      let result = null;
+      if (sessionId) {
+        result = await stopInterview(sessionId, pairCode);
+      }
+
+      cleanupInterviewResources("manual_stop");
+
+      if (result && !result.error) {
+        navigate("/result", { state: { result } });
+        return;
+      }
+
+      navigate("/");
+    } catch (error) {
+      console.error("Failed to stop interview:", error);
+      cleanupInterviewResources("manual_stop_error");
+      navigate("/");
+    }
   };
 
   return (
@@ -202,6 +482,17 @@ function Interview({ setPage, setResult }) {
           <p style={{ color: colors.textSecondary, fontSize: "0.8rem", marginTop: "4px" }}>
             Proctoring Active
           </p>
+          <p style={{ color: colors.warning, fontSize: "0.9rem", marginTop: "8px" }}>
+            Warnings: {warningCount}
+          </p>
+          <p style={{ color: colors.accent, fontSize: "0.9rem", marginTop: "4px" }}>
+            Cheating Score: {cheatingScore}
+          </p>
+          {warningMessage && (
+            <p style={{ color: colors.danger, fontSize: "0.95rem", marginTop: "8px", fontWeight: 600 }}>
+              {warningMessage}
+            </p>
+          )}
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
@@ -233,27 +524,72 @@ function Interview({ setPage, setResult }) {
             </h2>
           </section>
 
-          <section style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-            <div>
-              <label style={{ fontSize: "0.7rem", color: colors.textSecondary, textTransform: "uppercase" }}>
-                Score
-              </label>
-              <h3 style={{ fontSize: "1.1rem", margin: "4px 0" }}>{cheatingScore}</h3>
-            </div>
-            <div>
-              <label style={{ fontSize: "0.7rem", color: colors.textSecondary, textTransform: "uppercase" }}>
-                Verdict
-              </label>
-              <h3
-                style={{
-                  fontSize: "1.1rem",
-                  margin: "4px 0",
-                  color: verdict === "Clean" ? colors.success : colors.danger
-                }}
-              >
-                {verdict}
-              </h3>
-            </div>
+          {/* Mobile Join Button */}
+          <section>
+            <label style={{ fontSize: "0.7rem", color: colors.textSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Mobile Camera
+            </label>
+            <button
+              onClick={() => window.open(`${window.location.origin}/mobile`, "_blank")}
+              style={{
+                marginTop: "8px",
+                width: "100%",
+                padding: "12px",
+                background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                color: "#fff",
+                border: "none",
+                borderRadius: "10px",
+                cursor: "pointer",
+                fontSize: "0.85rem",
+                fontWeight: "700",
+                letterSpacing: "0.02em",
+                boxShadow: "0 4px 14px rgba(99,102,241,0.4)"
+              }}
+            >
+              📱 Open Mobile Link
+            </button>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(`${window.location.origin}/mobile`);
+              }}
+              style={{
+                marginTop: "6px",
+                width: "100%",
+                padding: "8px",
+                background: "transparent",
+                color: colors.textSecondary,
+                border: `1px solid ${colors.border}`,
+                borderRadius: "8px",
+                cursor: "pointer",
+                fontSize: "0.75rem",
+              }}
+            >
+              Copy Link
+            </button>
+          </section>
+
+          <section style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            <label style={{ fontSize: "0.7rem", color: colors.textSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Exit Interview
+            </label>
+
+
+            <button
+              onClick={() => exitInterview("/candidate-profile")}
+              style={{
+                padding: "10px 12px",
+                background: "transparent",
+                color: colors.textPrimary,
+                border: `1px solid ${colors.border}`,
+                borderRadius: "8px",
+                cursor: "pointer",
+                fontSize: "0.85rem",
+                fontWeight: "600",
+                textAlign: "left"
+              }}
+            >
+              Back to Candidate
+            </button>
           </section>
         </div>
       </div>
@@ -277,9 +613,19 @@ function Interview({ setPage, setResult }) {
           flexDirection: "column",
           gap: "24px"
         }}>
+          <p style={{ margin: 0, color: colors.textSecondary, fontSize: "0.85rem" }}>
+            {candidate} | Topic: {topic.toUpperCase()} | Difficulty: {difficulty}
+          </p>
+
           <h3 style={{ fontSize: "1.25rem", fontWeight: "500", lineHeight: "1.6", margin: 0 }}>
             {question || "Initializing interview..."}
           </h3>
+
+          {feedback && (
+            <p style={{ margin: 0, color: "#86efac", fontSize: "0.88rem" }}>
+              Last feedback: {feedback}
+            </p>
+          )}
 
           <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
             <p style={{ fontSize: "0.9rem", color: colors.textSecondary, margin: 0 }}>
@@ -313,6 +659,7 @@ function Interview({ setPage, setResult }) {
 
               <button
                 onClick={handleSubmit}
+                disabled={proctoringStopped}
                 style={{
                   padding: "10px 24px",
                   background: colors.accent,
@@ -325,6 +672,23 @@ function Interview({ setPage, setResult }) {
                 }}
               >
                 Submit Response
+              </button>
+
+              <button
+                onClick={handleStopInterview}
+                disabled={proctoringStopped}
+                style={{
+                  padding: "10px 20px",
+                  background: "transparent",
+                  color: proctoringStopped ? colors.textSecondary : colors.danger,
+                  border: `1px solid ${proctoringStopped ? colors.border : colors.danger}`,
+                  borderRadius: "8px",
+                  cursor: proctoringStopped ? "not-allowed" : "pointer",
+                  fontSize: "0.9rem",
+                  fontWeight: "600"
+                }}
+              >
+                {proctoringStopped ? "Proctoring Stopped" : "Stop Proctoring"}
               </button>
             </div>
           </div>

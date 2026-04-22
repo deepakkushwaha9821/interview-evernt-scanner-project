@@ -1,15 +1,16 @@
 export function detectTabSwitch(sendEvent){
-
-  document.addEventListener("visibilitychange", () => {
-
+  const handleVisibilityChange = () => {
     if (document.hidden) {
-
       sendEvent({
         type: "tab_switch"
       });
-
     }
+  };
 
-  });
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+
+  return () => {
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+  };
 
 }

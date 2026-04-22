@@ -21,7 +21,8 @@ export default function UserLogin() {
       const data = await res.json();
 
       if (data.role === "user") {
-        navigate("/interview");
+        localStorage.setItem("candidate_username", data.username || username);
+        navigate("/candidate-profile");
       } else {
         alert("Login failed: Unauthorized role or credentials");
       }
